@@ -64,7 +64,6 @@ export function DashboardPage({ id }: { id?: string }) {
         />
       ) : null}
       <header>
-        <h1>{dash.title}</h1>
         {dash.admin ? <span className="badge">admin</span> : null}
         {!dash.admin && !disabled.has('messages') && resolvedId ? (
           <Messages dashboard={resolvedId} />
@@ -93,6 +92,7 @@ export function DashboardPage({ id }: { id?: string }) {
       {activeOverlay ? (
         <Overlay overlay={activeOverlay} onClose={() => setOverlayId(null)} dashboard={resolvedId} />
       ) : null}
+      <footer className="dashboard-footer">{dash.title}</footer>
       {!disabled.has('notifications') ? (
         <Notifications overlays={overlays} onOpenOverlay={setOverlayId} dashboard={resolvedId} />
       ) : null}

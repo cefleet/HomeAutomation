@@ -113,3 +113,30 @@ export interface IntercomSession {
 export type IntercomEvent =
   | ({ op: 'start' } & IntercomSession)
   | { op: 'stop'; sessionId: string; targets: string[] };
+
+export interface MediaPlayerState {
+  id: string;
+  /** Liveness of the player's daemon link, not playback. */
+  connected: boolean;
+  /** Daemon has an authenticated Spotify Connect session. */
+  loggedIn: boolean;
+  /** This daemon is the active Spotify Connect device. */
+  isActive: boolean;
+  deviceName: string;
+  playing: boolean;
+  track: string;
+  artist: string;
+  album: string;
+  /** Playlist/show the current track is playing from, when known. */
+  contextName: string;
+  albumArtUrl: string;
+  volume: number;
+  /** Position anchor in ms — interpolate with `speed`. */
+  progressMs: number;
+  /** Position advancement rate (0 paused, ~1 playing). */
+  speed: number;
+  durationMs: number;
+  shuffle?: boolean;
+  repeat?: 'off' | 'context' | 'track';
+  updatedAt: string;
+}

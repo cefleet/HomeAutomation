@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+config/
+.amazonq/
+.claude/
+.devin/
+.windsurf/
+openspec/
+AGENTS.md
+CLAUDE.md
+mocks
+src/server/data/
+temp/

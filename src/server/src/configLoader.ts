@@ -33,12 +33,14 @@ export function validateDevice(raw: unknown, file: string): DeviceConfig {
     if (typeof d[field] !== 'string' || !d[field])
       throw new ConfigError(`${file}: missing required field "${field}"`);
   }
-  for (const field of ['source', 'sourceType', 'zoneGroup']) {
+  for (const field of ['source', 'sourceType', 'zoneGroup', 'apiKey', 'apiKeyIssued', 'deviceName', 'daemonBin', 'clientId', 'clientSecret']) {
     if (d[field] !== undefined && (typeof d[field] !== 'string' || !d[field]))
       throw new ConfigError(`${file}: "${field}" must be a non-empty string`);
   }
   if (d.sourceType !== undefined && d.source === undefined)
     throw new ConfigError(`${file}: "sourceType" requires "source"`);
+  if (d.maxTempC !== undefined && (typeof d.maxTempC !== 'number' || !Number.isFinite(d.maxTempC)))
+    throw new ConfigError(`${file}: "maxTempC" must be a number`);
   if (d.zoneRole !== undefined) {
     if (d.zoneRole !== 'master' && d.zoneRole !== 'member')
       throw new ConfigError(`${file}: "zoneRole" must be "master" or "member"`);

@@ -14,9 +14,11 @@ import { deviceRouter, targetsAllow } from './devices.js';
 import { actingDashboard, clientResolution } from './middleware.js';
 import { NotificationCenter } from './notifications.js';
 import { ServiceRegistry } from './registry.js';
+import { heaterService } from './services/heater.js';
 import { intercomService } from './services/intercom.js';
 import { lightService } from './services/light.js';
 import { messengerService } from './services/messenger.js';
+import { spotifyService } from './services/spotify.js';
 import { thermostatService } from './services/thermostat.js';
 import { weatherService } from './services/weather.js';
 import { weatherGovService } from './services/weatherGov.js';
@@ -51,8 +53,10 @@ export function createApp({ configDir, clientDist, devOrigin, prod = false, data
 } {
   const registry = new ServiceRegistry();
   registry.register(lightService);
+  registry.register(heaterService);
   registry.register(intercomService);
   registry.register(messengerService);
+  registry.register(spotifyService);
   registry.register(thermostatService);
   registry.register(weatherService);
   registry.register(weatherGovService);

@@ -51,6 +51,12 @@ export interface Service {
   /** Dashboard feature governing this service's target list (e.g. messenger
    *  → "messages"). Dashboards disabling it are excluded from `ctx.targets`. */
   targetFeature?: DashboardFeature;
+  /** When true, the device router instantiates this service's routes at
+   *  startup for every configured device rather than lazily on first
+   *  request — for services that own a long-lived resource (e.g. a
+   *  supervised daemon process or socket) that must run regardless of
+   *  incoming traffic. */
+  eager?: boolean;
   createRoutes: (ctx: ServiceContext) => Router;
 }
 

@@ -77,5 +77,19 @@ export function deviceRouter(
     });
   });
 
+  // Eager services own long-lived resources (supervised daemons, sockets)
+  // that must exist before any request — build their routers at startup.
+  for (const device of devices) {
+    const service = registry.get(device.service);
+    if (service?.eager && !routers.has(device.id)) {
+      routers.set(
+        device.id,
+        service.createRoutes(
+          registry.contextFor(device, (n) => notifications.emit(n), extras),
+        ),
+      );
+    }
+  }
+
   return r;
 }

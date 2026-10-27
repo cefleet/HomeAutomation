@@ -80,6 +80,17 @@ test('invalid zoneRole value is rejected', () => {
   );
 });
 
+test('non-numeric maxTempC is rejected', () => {
+  assert.throws(
+    load('none', { maxTempC: 'hot' }),
+    /"maxTempC" must be a number/,
+  );
+});
+
+test('numeric maxTempC is accepted', () => {
+  assert.equal(load('none', { maxTempC: 40 })().length, 1);
+});
+
 test('service validateDevices hook errors fail the load', () => {
   const registry = new ServiceRegistry();
   const svc: Service = {
