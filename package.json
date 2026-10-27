@@ -1,0 +1,17 @@
+{
+  "name": "fleetwood-home-automation",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Fleetwood Home Automation - config-driven device services and dashboards",
+  "scripts": {
+    "dev": "concurrently -n server,client,mocks -c blue,green,magenta \"npm --prefix src/server run dev\" \"npm --prefix src/client run dev\" \"npm --prefix src/server run emulate\"",
+    "emulate": "npm --prefix src/server run emulate",
+    "build": "npm --prefix src/server run build && npm --prefix src/client run build",
+    "start": "npm --prefix src/server run start",
+    "test": "npm --prefix src/server run test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "concurrently": "^9.1.2"
+  }
+}

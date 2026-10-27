@@ -1,0 +1,7 @@
+{
+  "name": "dev-mock-devices",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Standalone ESPHome API emulator — serves mock devices defined by the JSON files in this directory"
+}
