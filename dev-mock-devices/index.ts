@@ -243,3 +243,4 @@ server.listen(PORT, () => {
   console.log(`[mock-devices] listening on http://localhost:${PORT}`);
   for (const key of devices.keys()) console.log(`[mock-devices]   ${key}`);
 });
+
