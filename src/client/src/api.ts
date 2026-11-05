@@ -1,5 +1,4 @@
-const API_ORIGIN: string =
-  import.meta.env.VITE_API_ORIGIN ?? 'http://localhost:3001';
+const API_ORIGIN: string = import.meta.env.VITE_API_ORIGIN ?? '';
 
 export const apiUrl = (path: string) => `${API_ORIGIN}${path}`;
 
