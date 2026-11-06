@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { apiGet } from '../api';
+import shield from '../assets/shield.png';
 import type { DashboardConfig } from '../types';
 import { AdminDashboard } from './AdminDashboard';
+import { componentRegistry } from './cards';
 import { ViewSlot } from './DeviceView';
 import { Intercom } from './intercom/Intercom';
 import { Messages } from './messages/Messages';
@@ -34,6 +36,9 @@ export function DashboardPage({ id }: { id?: string }) {
   const overlays = new Map((dash.overlays ?? []).map((o) => [o.id, o]));
   const activeOverlay = overlayId ? overlays.get(overlayId) : undefined;
   const disabled = new Set(dash.disabled);
+  // Chip views join the header chrome; everything else stays in the grid.
+  const chipViews = dash.views.filter((v) => componentRegistry[v.component]?.kind === 'chip');
+  const gridViews = dash.views.filter((v) => componentRegistry[v.component]?.kind !== 'chip');
 
   const THEME_VARS: Record<string, string> = {
     background: '--bg',
@@ -64,27 +69,37 @@ export function DashboardPage({ id }: { id?: string }) {
         />
       ) : null}
       <header>
-        {dash.admin ? <span className="badge">admin</span> : null}
-        {!dash.admin && !disabled.has('messages') && resolvedId ? (
-          <Messages dashboard={resolvedId} />
-        ) : null}
-        {!dash.admin && !disabled.has('intercom') && resolvedId ? (
-          <Intercom dashboard={resolvedId} />
-        ) : null}
+        {chipViews.map((v, i) => (
+          <ViewSlot key={i} view={v} onOpenOverlay={setOverlayId} dashboard={resolvedId} />
+        ))}
+        <div className="header-actions">
+          {dash.admin ? (
+            <span className="badge">
+              <img className="badge-icon" src={shield} alt="" />
+              admin
+            </span>
+          ) : null}
+          {!dash.admin && !disabled.has('messages') && resolvedId ? (
+            <Messages dashboard={resolvedId} />
+          ) : null}
+          {!dash.admin && !disabled.has('intercom') && resolvedId ? (
+            <Intercom dashboard={resolvedId} />
+          ) : null}
+        </div>
       </header>
       {dash.admin ? (
         <AdminDashboard
           columns={dash.layout.columns}
           dashboard={resolvedId}
-          views={dash.views}
+          views={gridViews}
           onOpenOverlay={setOverlayId}
         />
       ) : (
         <div
           className="dashboard-grid"
-          style={{ gridTemplateColumns: `repeat(${dash.layout.columns ?? 3}, minmax(0, 1fr))` }}
+          style={{ '--dash-cols': dash.layout.columns ?? 3 } as React.CSSProperties}
         >
-          {dash.views.map((v, i) => (
+          {gridViews.map((v, i) => (
             <ViewSlot key={i} view={v} onOpenOverlay={setOverlayId} dashboard={resolvedId} />
           ))}
         </div>

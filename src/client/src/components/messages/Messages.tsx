@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { showError } from '../../errors';
+import mail from '../../assets/mail.png';
 import { useMessaging, useMessagingDevice } from '../../hooks/useApi';
 import type { MessageThread } from '../../types';
 import { MessagesBadge } from './MessagesBadge';
@@ -45,7 +46,10 @@ export function Messages({ dashboard }: { dashboard: string }) {
           {incoming.map((t) => (
             <div key={t.id} className="notification">
               <div className="notification-head">
-                <strong>Message from {t.from}</strong>
+                <strong>
+                  <img className="badge-icon" src={mail} alt="" />
+                  Message from {t.from}
+                </strong>
                 <button onClick={() => act(markSeen(t.id))} aria-label="dismiss">
                   ×
                 </button>

@@ -30,20 +30,53 @@ main {
 }
 header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 .badge {
-  background: var(--accent);
-  border-radius: 10px;
-  padding: 2px 8px;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 2px solid var(--accent);
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.badge-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
 }
 .dashboard-grid {
   display: grid;
   gap: 16px;
+  grid-template-columns: repeat(var(--dash-cols, 3), minmax(0, 1fr));
+}
+@media (max-width: 960px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .card {
+  position: relative;
+  padding: 8px;
+}
+.card-boxed {
   border: 2px solid var(--border);
   border-radius: 12px;
   padding: 14px;
@@ -54,13 +87,7 @@ header {
 }
 .card-body h3 {
   margin: 0 0 8px;
-}
-.swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  margin-left: 8px;
+  text-align: center;
 }
 .muted {
   color: var(--muted);
@@ -102,6 +129,7 @@ header {
   filter: brightness(1.2);
 }
 .chip {
+  position: relative;
   display: inline-block;
   width: max-content;
   justify-self: start;
@@ -112,11 +140,15 @@ header {
   background: var(--surface);
   font-weight: 600;
 }
-.forecast {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  font-size: 13px;
-  color: var(--muted);
+.chip-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chip-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
 }
 .error {
   color: #f87171;
@@ -135,6 +167,7 @@ button:hover {
 .overlay-backdrop {
   position: fixed;
   inset: 0;
+  z-index: 20;
   background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
@@ -148,6 +181,15 @@ button:hover {
   min-width: 320px;
   max-width: 640px;
 }
+@media (max-width: 960px) {
+  .overlay {
+    position: absolute;
+    inset: 8px;
+    min-width: 0;
+    max-width: none;
+    overflow-y: auto;
+  }
+}
 .overlay-header {
   display: flex;
   justify-content: space-between;
@@ -160,6 +202,7 @@ button:hover {
 }
 .notifications {
   position: fixed;
+  z-index: 30;
   right: 16px;
   bottom: 16px;
   display: grid;
@@ -177,6 +220,11 @@ button:hover {
   justify-content: space-between;
   align-items: center;
 }
+.notification-head strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .notification.error-toast {
   border-color: #f87171;
 }
@@ -186,8 +234,16 @@ button:hover {
   margin-top: 8px;
 }
 .messages-badge {
-  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font: inherit;
+  font-weight: 600;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: var(--surface);
+  color: var(--text);
 }
 .messages-count {
   background: var(--accent);
@@ -287,10 +343,16 @@ button:disabled {
   padding: 6px 8px;
   font: inherit;
 }
-.intercom-arm {
-  font-size: 12px;
-  padding: 4px 10px;
-  border: 1px solid #39415a;
+.intercom-talk {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: var(--surface);
+  color: var(--text);
 }
 .intercom-talk.on {
   background: #4c1d24;
@@ -305,12 +367,15 @@ button:disabled {
 }
 .intercom-live {
   position: fixed;
+  z-index: 30;
   left: 16px;
   bottom: 16px;
   width: 280px;
 }
 .intercom-live-label {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: #1f2533;
   border: 1px solid #39415a;
   border-radius: 12px;
@@ -400,4 +465,191 @@ hr.hr {
   font-size: 12px;
   letter-spacing: 0.08em;
   color: var(--muted);
+}
+
+/* light switch — vertical wall-toggle visual */
+.light-switch {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+.light-switch h3 {
+  margin: 0;
+}
+.light-toggle {
+  width: 54px;
+  height: 90px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 5px;
+  display: flex;
+  cursor: pointer;
+}
+.light-toggle-lever {
+  width: 100%;
+  height: 50%;
+  border-radius: 6px;
+  background: #39415a;
+  align-self: flex-end;
+}
+.light-toggle.on .light-toggle-lever {
+  align-self: flex-start;
+  background: var(--card-accent, var(--accent));
+}
+.light-toggle:hover {
+  filter: brightness(1.15);
+}
+
+/* arc slider — curved setpoint control */
+.arc-slider {
+  position: relative;
+  width: 100%;
+  max-width: 220px;
+  margin: 0 auto;
+}
+.arc-slider svg {
+  display: block;
+  width: 100%;
+  touch-action: none;
+  cursor: pointer;
+}
+.arc-track {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 14;
+  stroke-linecap: round;
+}
+.arc-progress {
+  fill: none;
+  stroke: var(--card-accent, var(--accent));
+  stroke-width: 14;
+  stroke-linecap: round;
+}
+.arc-handle {
+  fill: var(--text);
+  stroke: var(--surface);
+  stroke-width: 3;
+}
+.arc-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+.arc-mode {
+  font-size: 13px;
+  color: var(--card-accent, var(--accent));
+  text-transform: capitalize;
+}
+.arc-temp {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.arc-set {
+  font-size: 13px;
+  color: var(--muted);
+}
+.mode-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 10px 0 0;
+}
+
+/* weather card — forecast-forward layout */
+.weather-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.weather-icon-lg {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+.weather-temp {
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.weather-details {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.weather-details span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.weather-details img,
+.weather-forecast img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+.weather-forecast {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.weather-forecast li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.weather-forecast .fname {
+  flex: 1;
+}
+.weather-forecast .ftemp {
+  font-weight: 600;
+}
+
+/* icon attribution — bottom of the admin dashboard */
+.attribution {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.attribution a {
+  color: var(--muted);
+}
+
+/* unreachable device — dimmed, inert content + centered badge */
+.device-unreachable {
+  pointer-events: none;
+}
+.device-unreachable .card-body,
+.device-unreachable .chip-body {
+  opacity: 0.45;
+}
+.unreachable-badge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f87171;
+}
+.unreachable-icon {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
 }

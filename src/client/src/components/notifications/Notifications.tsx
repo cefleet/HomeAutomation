@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react';
 import { apiSend } from '../../api';
 import { onError, showError, type LocalError } from '../../errors';
 import { useNotifications } from '../../hooks/useApi';
-import type { DashboardOverlay } from '../../types';
+import type { AppNotification, DashboardOverlay } from '../../types';
+import bell from '../../assets/bell.png';
+import warning from '../../assets/warning.png';
+
+/** Notification type → icon: problem reports get the warning triangle,
+ *  everything else the bell. */
+const notifyIcon = (n: AppNotification) =>
+  n.type === 'issue' || n.type === 'error' ? warning : bell;
 
 export function Notifications({
   overlays,
@@ -22,7 +29,10 @@ export function Notifications({
       {errors.map((e) => (
         <div key={`err-${e.id}`} className="notification error-toast">
           <div className="notification-head">
-            <strong>Change failed</strong>
+            <strong>
+              <img className="badge-icon" src={warning} alt="" />
+              Change failed
+            </strong>
             <button onClick={() => setErrors((prev) => prev.filter((x) => x.id !== e.id))} aria-label="dismiss">×</button>
           </div>
           <p>{e.message}</p>
@@ -31,7 +41,10 @@ export function Notifications({
       {items.map((n) => (
         <div key={n.id} className="notification">
           <div className="notification-head">
-            <strong>{n.title ?? n.type}</strong>
+            <strong>
+              <img className="badge-icon" src={notifyIcon(n)} alt="" />
+              {n.title ?? n.type}
+            </strong>
             <button onClick={() => dismiss(n.id)} aria-label="dismiss">×</button>
           </div>
           {n.body ? <p>{n.body}</p> : null}

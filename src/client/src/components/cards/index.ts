@@ -13,7 +13,7 @@ export const componentRegistry: Record<string, RegistryEntry> = {
   'heater-card': { component: HeaterCard, kind: 'card' },
   'light-card': { component: LightCard, kind: 'card' },
   'media-picker': { component: MediaPicker, kind: 'card' },
-  'media-player-card': { component: MediaPlayerCard, kind: 'card' },
+  'media-player-card': { component: MediaPlayerCard, kind: 'card', boxed: true },
   'thermostat-card': { component: ThermostatCard, kind: 'card' },
   'zoned-thermostat-card': { component: ZonedThermostatCard, kind: 'card' },
   'weather-card': { component: WeatherCard, kind: 'card' },

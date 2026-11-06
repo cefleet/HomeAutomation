@@ -47,7 +47,7 @@ export function AdminDashboard({
           <h3 className="muted">{type}</h3>
           <div
             className="dashboard-grid"
-            style={{ gridTemplateColumns: `repeat(${columns ?? 3}, minmax(0, 1fr))` }}
+            style={{ '--dash-cols': columns ?? 3 } as React.CSSProperties}
           >
             {list.map((d) => {
               const view: DashboardView = {
@@ -64,7 +64,7 @@ export function AdminDashboard({
       {views?.length ? (
         <div
           className="dashboard-grid"
-          style={{ gridTemplateColumns: `repeat(${columns ?? 3}, minmax(0, 1fr))` }}
+          style={{ '--dash-cols': columns ?? 3 } as React.CSSProperties}
         >
           {views.map((v, i) => (
             <ViewSlot key={i} view={v} onOpenOverlay={onOpenOverlay} dashboard={dashboard} />
@@ -72,6 +72,12 @@ export function AdminDashboard({
         </div>
       ) : null}
       <AddDeviceForm services={services} onAdded={refresh} />
+      <footer className="attribution">
+        Icons created by Freepik, Arkinasi, and Rizki Ahmad Fauzi -{' '}
+        <a href="https://www.flaticon.com/free-icons/weather" target="_blank" rel="noreferrer">
+          Flaticon
+        </a>
+      </footer>
     </>
   );
 }
@@ -131,7 +137,7 @@ function AddDeviceForm({
   };
 
   return (
-    <form className="card" onSubmit={submit}>
+    <form className="card card-boxed" onSubmit={submit}>
       <h3>Add device</h3>
       <input
         placeholder="device id"

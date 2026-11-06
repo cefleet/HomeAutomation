@@ -83,15 +83,18 @@ function subscribeStream(
 }
 
 /** Fetch device state, polling or stream-subscribing per the service
- *  transport. View `params` are appended as query parameters. */
+ *  transport. View `params` are appended as query parameters. `unreachable`
+ *  flips true when a state fetch fails (e.g., a 502 for a down sourced
+ *  device) and clears on the next successful fetch or push. */
 export function useDeviceData(
   device: DeviceRef,
   transport: 'poll' | 'push' | undefined,
   params?: Record<string, string | number>,
   pollMs = 5000,
   dashboard?: string,
-): unknown {
+): { data: unknown; unreachable: boolean } {
   const [data, setData] = useState<unknown>(null);
+  const [unreachable, setUnreachable] = useState(false);
   const qs = queryString(params);
   useEffect(() => {
     if (!transport) return;
@@ -99,20 +102,35 @@ export function useDeviceData(
     if (transport === 'push') {
       // (Re)fetch state whenever the stream (re)connects so a missed or
       // failed initial fetch heals itself.
-      const load = () => apiGet(statePath).then(setData).catch(() => {});
+      const load = () =>
+        apiGet(statePath)
+          .then((d) => {
+            setData(d);
+            setUnreachable(false);
+          })
+          .catch(() => setUnreachable(true));
       load();
       if (!dashboard) return;
       return subscribeStream(
         dashboard,
         (e) => {
-          if (e.type === 'device' && e.device.type === device.type && e.device.id === device.id)
+          if (e.type === 'device' && e.device.type === device.type && e.device.id === device.id) {
             setData(e.data);
+            setUnreachable(false);
+          }
         },
         load,
       );
     }
     let alive = true;
-    const load = () => apiGet(statePath).then((d) => alive && setData(d)).catch(() => {});
+    const load = () =>
+      apiGet(statePath)
+        .then((d) => {
+          if (!alive) return;
+          setData(d);
+          setUnreachable(false);
+        })
+        .catch(() => alive && setUnreachable(true));
     load();
     const t = setInterval(load, pollMs);
     return () => {
@@ -120,7 +138,7 @@ export function useDeviceData(
       clearInterval(t);
     };
   }, [device.type, device.id, transport, qs, pollMs, dashboard]);
-  return data;
+  return { data, unreachable };
 }
 
 /** Live notification feed for the viewed dashboard. */
@@ -282,8 +300,8 @@ interface Tx {
 }
 
 /** Live intercom state for a viewed dashboard: the incoming broadcast
- *  session (from /state + the device's push stream), audio arming, and
- *  start/stop broadcasting via MediaRecorder chunk uploads. All calls carry
+ *  session (from /state + the device's push stream), and start/stop
+ *  broadcasting via MediaRecorder chunk uploads. All calls carry
  *  `?dashboard=` so the server treats the viewed dashboard as the acting
  *  identity. */
 export function useIntercom(
@@ -292,14 +310,11 @@ export function useIntercom(
 ): {
   session: IntercomSession | null;
   broadcasting: boolean;
-  armed: boolean;
-  arm: () => void;
   start: (targets: string[]) => Promise<void>;
   stop: () => Promise<void>;
 } {
   const [session, setSession] = useState<IntercomSession | null>(null);
   const [broadcasting, setBroadcasting] = useState(false);
-  const [armed, setArmed] = useState(false);
   const tx = useRef<Tx | null>(null);
   const qs = dashboard ? `?dashboard=${encodeURIComponent(dashboard)}` : '';
   const base = device ? `/api/${device.type}/${device.id}` : '';
@@ -381,7 +396,5 @@ export function useIntercom(
     setBroadcasting(true);
   };
 
-  const arm = () => setArmed(true);
-
-  return { session, broadcasting, armed, arm, start, stop };
+  return { session, broadcasting, start, stop };
 }

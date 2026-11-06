@@ -9,4 +9,6 @@ export interface CardProps {
 export type RegistryEntry = {
   component: (p: CardProps) => JSX.Element;
   kind: 'card' | 'chip';
+  /** Card renders with the bordered box even without a `boxed` view prop. */
+  boxed?: boolean;
 };

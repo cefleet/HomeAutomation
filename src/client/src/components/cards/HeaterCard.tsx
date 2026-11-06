@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiSend } from '../../api';
 import { showError } from '../../errors';
+import { ArcSlider } from './ArcSlider';
 import type { CardProps } from './types';
 import { toDisplay, unitProp, type Units } from './weatherFormat';
 
@@ -13,8 +14,8 @@ interface HeaterState {
   updatedAt: string;
 }
 
-/** Setpoint slider runs in display units, bounded by the device's max. */
-const sliderRange = (units: Units, maxSetpointC: number | undefined) => ({
+/** Setpoint arc runs in display units, bounded by the device's max. */
+const arcRange = (units: Units, maxSetpointC: number | undefined) => ({
   min: units === 'F' ? 50 : 10,
   max: toDisplay(maxSetpointC ?? 32, units) ?? (units === 'F' ? 90 : 32),
 });
@@ -75,19 +76,28 @@ export function HeaterCard({ device, data, props }: CardProps) {
     });
   };
 
-  const { min, max } = sliderRange(units, s.maxSetpointC);
+  const { min, max } = arcRange(units, s.maxSetpointC);
   const on = pendingOn ?? s.on;
 
   return (
-    <div className="card-body">
+    <div className="card-body thermo">
       <h3>{device.id}</h3>
-      <p>
-        {current === undefined ? 'loading…' : `${current}°${units}`}{' '}
-        <span className="muted">
-          → {slider ?? shown ?? '—'}°{units} · {on === undefined ? '—' : on ? 'on' : 'off'}
-        </span>
-      </p>
-      <p>
+      <ArcSlider
+        min={min}
+        max={max}
+        value={slider ?? shown}
+        disabled={shown === undefined}
+        onInput={onSlide}
+      >
+        <div className="arc-mode">{on === undefined ? '—' : on ? 'on' : 'off'}</div>
+        <div className="arc-temp">
+          {current === undefined ? '—' : `${current}°`}
+        </div>
+        <div className="arc-set">
+          {current === undefined ? 'loading…' : `set ${slider ?? shown ?? '—'}°${units}`}
+        </div>
+      </ArcSlider>
+      <p className="mode-buttons">
         {([false, true] as const).map((v) => (
           <button
             key={String(v)}
@@ -101,16 +111,6 @@ export function HeaterCard({ device, data, props }: CardProps) {
           </button>
         ))}
       </p>
-      {shown !== undefined ? (
-        <input
-          type="range"
-          min={min}
-          max={max}
-          value={slider ?? shown}
-          onChange={(e) => onSlide(Number(e.target.value))}
-          onClick={(e) => e.stopPropagation()}
-        />
-      ) : null}
     </div>
   );
 }

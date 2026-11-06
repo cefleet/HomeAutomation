@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiSend } from '../../api';
 import { showError } from '../../errors';
+import { ArcSlider } from './ArcSlider';
 import type { CardProps } from './types';
 import { toDisplay, unitProp, type Units } from './weatherFormat';
 
@@ -18,8 +19,8 @@ interface ZonedThermostatState {
   allowedModes?: ZonedMode[];
 }
 
-/** Setpoint slider runs in display units. */
-const sliderRange = (units: Units) =>
+/** Setpoint arc runs in display units. */
+const arcRange = (units: Units) =>
   units === 'F' ? { min: 60, max: 86 } : { min: 16, max: 30 };
 const toCelsius = (v: number, units: Units) =>
   units === 'F' ? Math.round((((v - 32) * 5) / 9) * 10) / 10 : v;
@@ -79,20 +80,31 @@ export function ZonedThermostatCard({ device, data, props }: CardProps) {
     });
   };
 
-  const { min, max } = sliderRange(units);
+  const { min, max } = arcRange(units);
   const mode = pendingMode ?? s.mode;
 
   return (
-    <div className="card-body">
-      <h3>{device.id}</h3>
-      <p>
-        {current === undefined ? 'loading…' : `${current}°${units}`}{' '}
-        <span className="muted">
-          → {slider ?? shown ?? '—'}°{units} · {mode ?? '—'}
-          {s.zoneRole ? ` · ${s.zoneRole}` : ''}
-        </span>
-      </p>
-      <p>
+    <div className="card-body thermo">
+      <h3>
+        {device.id}
+        {s.zoneRole ? <span className="muted"> · {s.zoneRole}</span> : null}
+      </h3>
+      <ArcSlider
+        min={min}
+        max={max}
+        value={slider ?? shown}
+        disabled={shown === undefined}
+        onInput={onSlide}
+      >
+        <div className="arc-mode">{mode ?? '—'}</div>
+        <div className="arc-temp">
+          {current === undefined ? '—' : `${current}°`}
+        </div>
+        <div className="arc-set">
+          {current === undefined ? 'loading…' : `set ${slider ?? shown ?? '—'}°${units}`}
+        </div>
+      </ArcSlider>
+      <p className="mode-buttons">
         {MODES.map((m) => (
           <button
             key={m}
@@ -107,16 +119,6 @@ export function ZonedThermostatCard({ device, data, props }: CardProps) {
           </button>
         ))}
       </p>
-      {shown !== undefined ? (
-        <input
-          type="range"
-          min={min}
-          max={max}
-          value={slider ?? shown}
-          onChange={(e) => onSlide(Number(e.target.value))}
-          onClick={(e) => e.stopPropagation()}
-        />
-      ) : null}
     </div>
   );
 }
