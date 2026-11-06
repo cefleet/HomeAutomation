@@ -65,7 +65,7 @@ export function deviceRouter(
       return;
     }
 
-    accessControl()(req, res, () => {
+    const dispatch = () => {
       let deviceR = routers.get(device.id);
       if (!deviceR) {
         deviceR = service.createRoutes(
@@ -74,7 +74,8 @@ export function deviceRouter(
         routers.set(device.id, deviceR);
       }
       deviceR(req, res, next);
-    });
+    };
+    accessControl()(req, res, dispatch);
   });
 
   // Eager services own long-lived resources (supervised daemons, sockets)

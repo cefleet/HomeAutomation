@@ -33,6 +33,7 @@ function mount(notices: NotificationInput[], devices: DeviceConfig[]): Express {
       dashboards: ['master'],
       targets: ['master'],
       dataDir: '/tmp',
+    configDir: '/tmp',
       prod: false,
     };
     app.use(`/api/zoned/${d.id}`, zonedService.createRoutes(ctx));

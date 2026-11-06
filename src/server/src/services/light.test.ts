@@ -32,6 +32,7 @@ function mount(source?: string, pushed: unknown[] = []): Express {
     dashboards: ['master'],
     targets: ['master'],
     dataDir: '/tmp',
+    configDir: '/tmp',
     prod: false,
   };
   const app = express();

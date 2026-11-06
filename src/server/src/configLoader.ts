@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ServiceRegistry } from './registry.js';
@@ -33,7 +34,7 @@ export function validateDevice(raw: unknown, file: string): DeviceConfig {
     if (typeof d[field] !== 'string' || !d[field])
       throw new ConfigError(`${file}: missing required field "${field}"`);
   }
-  for (const field of ['source', 'sourceType', 'zoneGroup', 'apiKey', 'apiKeyIssued', 'deviceName', 'daemonBin', 'clientId', 'clientSecret']) {
+  for (const field of ['source', 'sourceType', 'zoneGroup', 'deviceName', 'clientId', 'clientSecret', 'refreshToken']) {
     if (d[field] !== undefined && (typeof d[field] !== 'string' || !d[field]))
       throw new ConfigError(`${file}: "${field}" must be a non-empty string`);
   }
@@ -55,6 +56,27 @@ export function validateDevice(raw: unknown, file: string): DeviceConfig {
   )
     throw new ConfigError(`${file}: "access" must declare "read" and "write" role arrays`);
   return d as unknown as DeviceConfig;
+}
+
+/** Apply a partial update to the config file declaring device `id` under
+ *  `<configDir>/devices`, writing atomically with owner-only permissions.
+ *  Throws ConfigError when no file declares that id. */
+export function updateDeviceConfigFile(
+  configDir: string,
+  deviceId: string,
+  updates: Record<string, unknown>,
+): string {
+  const dir = path.join(configDir, 'devices');
+  for (const { file, data } of jsonFiles(dir)) {
+    if (!isRecord(data) || data.id !== deviceId) continue;
+    const next = { ...data, ...updates };
+    const temp = `${file}.${randomUUID()}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
+    fs.renameSync(temp, file);
+    fs.chmodSync(file, 0o600);
+    return file;
+  }
+  throw new ConfigError(`${dir}: no device config declares id "${deviceId}"`);
 }
 
 /** Per-device registration checks shared by file loading and runtime adds. */

@@ -22,6 +22,7 @@ function mount(notices: NotificationInput[] = [], extra: Partial<DeviceConfig> =
     dashboards: ['master'],
     targets: ['master'],
     dataDir: '/tmp',
+    configDir: '/tmp',
     prod: false,
   };
   const app = express();

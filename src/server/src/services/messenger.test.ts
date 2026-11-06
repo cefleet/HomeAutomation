@@ -32,6 +32,7 @@ function mount(dataDir: string, pushed: unknown[] = [], prod = false): Express {
     dashboards: ['master', 'kitchen', 'living-room'],
     targets: ['master', 'kitchen', 'living-room'],
     dataDir,
+    configDir: '/tmp',
     prod,
   };
   const app = express();

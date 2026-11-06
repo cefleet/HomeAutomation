@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "spotify-auth": "tsx src/spotify-auth.ts",
     "emulate": "tsx watch ../../dev-mock-devices/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",

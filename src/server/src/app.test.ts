@@ -209,6 +209,34 @@ test('dashboards disabling messages are rejected as send targets', async () => {
   close();
 });
 
+test('Spotify app secrets are persisted privately and never returned by device APIs', async () => {
+  const { base, close, configDir } = await listen();
+  const res = await post(
+    base,
+    '/api/devices',
+    {
+      id: 'spotify-account',
+      service: 'spotify',
+      description: 'test Spotify account',
+      clientId: 'spotify-client-id',
+      clientSecret: 'spotify-client-secret',
+      refreshToken: 'spotify-refresh-secret',
+      access: { read: ['*'], write: ['*'] },
+    },
+    'admin',
+  );
+  assert.equal(res.status, 201);
+  const response = await res.json();
+  assert.equal(JSON.stringify(response).includes('spotify-client-secret'), false);
+  assert.equal(JSON.stringify(response).includes('spotify-refresh-secret'), false);
+  const file = path.join(configDir, 'devices', 'spotify-account.json');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const deviceList = await (await fetch(`${base}/api/devices`)).text();
+  assert.equal(deviceList.includes('spotify-client-secret'), false);
+  assert.equal(deviceList.includes('spotify-refresh-secret'), false);
+  close();
+});
+
 test('POST /api/devices persists and registers the device live', async () => {
   const { base, close, configDir } = await listen();
   const res = await post(

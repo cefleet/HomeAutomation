@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import http from 'node:http';
 import https from 'node:https';
+import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
@@ -14,6 +16,7 @@ const devOrigin =
   process.env.NODE_ENV === 'production' ? undefined : (process.env.DEV_ORIGIN ?? 'http://localhost:5173');
 const tlsCert = process.env.TLS_CERT;
 const tlsKey = process.env.TLS_KEY;
+if (!!tlsCert !== !!tlsKey) throw new Error('TLS_CERT and TLS_KEY must be set together');
 
 const { app, notifications } = createApp({
   configDir,
@@ -23,9 +26,16 @@ const { app, notifications } = createApp({
   dataDir: process.env.DATA_DIR,
 });
 
-const onReady = () => {
+const onReady = (server: http.Server | https.Server) => () => {
   const scheme = tlsCert && tlsKey ? 'https' : 'http';
-  console.log(`[fleetwood] server listening on ${scheme}://localhost:${port}`);
+  const address = server.address();
+  const host =
+    address && typeof address === 'object' && address.address && address.address !== '::' && address.address !== '0.0.0.0'
+      ? address.address
+      : (Object.values(networkInterfaces())
+          .flatMap((addresses) => addresses ?? [])
+          .find((info) => info.family === 'IPv4' && !info.internal)?.address ?? 'localhost');
+  console.log(`[fleetwood] server listening on ${scheme}://${host}:${port}`);
   notifications.emit({
     type: 'announcement',
     targets: ['master'],
@@ -35,9 +45,11 @@ const onReady = () => {
 };
 
 if (tlsCert && tlsKey) {
-  https
+  const server = https
     .createServer({ cert: fs.readFileSync(tlsCert), key: fs.readFileSync(tlsKey) }, app)
-    .listen(port, onReady);
+    .listen(port);
+  server.on('listening', onReady(server));
 } else {
-  app.listen(port, onReady);
+  const server = app.listen(port);
+  server.on('listening', onReady(server));
 }

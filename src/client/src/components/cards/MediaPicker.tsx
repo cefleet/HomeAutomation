@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend } from '../../api';
 import { showError } from '../../errors';
+import {
+  spotifyPlayerRegistration,
+  unlockSpotifyPlayer,
+} from '../../hooks/useSpotifyPlayer';
 import type { MediaPlayerState } from '../../types';
 import type { CardProps } from './types';
 
@@ -16,11 +20,10 @@ interface PickerItem {
 
 /**
  * Song picker for `media-player` devices — used inside an overlay (tap the
- * player card). Searches the Spotify catalog via `GET /search` (needs
- * clientId/clientSecret on the device config) and lists the daemon's play
- * queue via `GET /queue`. Tap a row to play (`play-uri`); "+" adds a track
- * to the queue (`queue-add`). Playback state itself lives in
- * MediaPlayerCard — this is just the picker surface.
+ * player card). Searches the Spotify catalog via the account-authorized
+ * server `GET /search` endpoint and lists its upcoming queue via `GET /queue`.
+ * Tap a row to play (`play-uri`); "+" adds a track to the queue (`queue-add`).
+ * Playback state itself lives in MediaPlayerCard.
  */
 export function MediaPicker({ device, data }: CardProps) {
   const s = (data ?? {}) as Partial<MediaPlayerState>;
@@ -66,12 +69,13 @@ export function MediaPicker({ device, data }: CardProps) {
   }, [q, base]);
 
   const send = async (command: string, value?: unknown) => {
+    unlockSpotifyPlayer(device.id);
     try {
-      await apiSend(
-        `${base}/command`,
-        'POST',
-        value === undefined ? { command } : { command, value },
-      );
+      await apiSend(`${base}/command`, 'POST', {
+        command,
+        ...(value === undefined ? {} : { value }),
+        playerId: spotifyPlayerRegistration(device.id) ?? undefined,
+      });
     } catch (e) {
       showError(`${device.id}: ${e instanceof Error ? e.message : e}`);
     }
@@ -120,6 +124,7 @@ export function MediaPicker({ device, data }: CardProps) {
       <input
         type="search"
         placeholder="Search Spotify…"
+        disabled={!s.loggedIn}
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
@@ -133,7 +138,11 @@ export function MediaPicker({ device, data }: CardProps) {
           <div className="picker-list">{queue.map((r) => row(r, false))}</div>
         </>
       ) : null}
-      {!usable ? <p className="muted">player unavailable</p> : null}
+      {!s.loggedIn ? (
+        <p className="muted">Spotify account is not authorized; run spotify-auth on the server.</p>
+      ) : !usable ? (
+        <p className="muted">Open this page in a browser that can play Spotify to start playback.</p>
+      ) : null}
     </div>
   );
 }

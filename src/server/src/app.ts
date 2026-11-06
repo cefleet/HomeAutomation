@@ -95,6 +95,7 @@ export function createApp({ configDir, clientDist, devOrigin, prod = false, data
       notifications: enabledFor('notifications'),
     },
     dataDir: dataDir ?? path.resolve(configDir, '..', 'data'),
+    configDir,
     prod,
   };
 
@@ -174,6 +175,7 @@ export function createApp({ configDir, clientDist, devOrigin, prod = false, data
     fs.writeFileSync(
       path.join(devicesDir, `${device.id}.json`),
       JSON.stringify(device, null, 2) + '\n',
+      { mode: 0o600 },
     );
     devices.push(device);
     res.status(201).json(deviceSummary(device));

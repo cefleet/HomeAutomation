@@ -20,23 +20,14 @@ export interface DeviceConfig {
   /** Highest accepted setpoint in °C (heater devices); overrides any
    *  source-reported max. */
   maxTempC?: number;
-  /** Soloist API key (spotify devices without `source` — the service
-   *  spawns and supervises the daemon itself). */
-  apiKey?: string;
-  /** ISO date the Soloist API key was issued (spotify devices) — keys
-   *  live ~180 days; the service warns ahead of expiry. */
-  apiKeyIssued?: string;
-  /** Spotify Connect device name a managed Soloist daemon advertises
-   *  (spotify devices); defaults to the device id. */
+  /** Logical name shown for a Spotify account device. */
   deviceName?: string;
-  /** Path/name of the daemon binary a managed service spawns (spotify
-   *  devices); defaults to `soloist` on PATH. */
-  daemonBin?: string;
-  /** Spotify for Developers app credentials (spotify devices) enabling
-   *  the `/search` endpoint — catalog metadata only; playback still goes
-   *  through the daemon. Both or neither. */
+  /** Spotify for Developers app credentials used by the spotify service. */
   clientId?: string;
   clientSecret?: string;
+  /** Spotify account refresh token; written by the spotify-auth CLI and
+   *  rotated back into this file by the spotify service. */
+  refreshToken?: string;
   description: string;
   access: { read: string[]; write: string[] };
 }

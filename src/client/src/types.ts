@@ -116,12 +116,16 @@ export type IntercomEvent =
 
 export interface MediaPlayerState {
   id: string;
-  /** Liveness of the player's daemon link, not playback. */
+  /** At least one browser player session is registered and available. */
   connected: boolean;
-  /** Daemon has an authenticated Spotify Connect session. */
+  /** The configured Spotify account is authorized server-side. */
   loggedIn: boolean;
-  /** This daemon is the active Spotify Connect device. */
+  /** The active Spotify playback target is one of the registered browsers. */
   isActive: boolean;
+  /** Available browser sessions registered for this Spotify account. */
+  players: { id: string; name: string; isActive: boolean }[];
+  /** Optional active registration ID for clients that need to identify it. */
+  activePlayerId?: string | null;
   deviceName: string;
   playing: boolean;
   track: string;

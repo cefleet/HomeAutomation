@@ -33,7 +33,7 @@ export function AdminDashboard({
   }, [refresh]);
 
   const groups = new Map<string, DeviceInfo[]>();
-  for (const d of (devices ?? []).filter((d) => d.source !== undefined)) {
+  for (const d of (devices ?? []).filter((d) => d.source !== undefined || d.type === 'spotify')) {
     const g = groups.get(d.type) ?? [];
     g.push(d);
     groups.set(d.type, g);
@@ -88,6 +88,9 @@ function AddDeviceForm({
   const [description, setDescription] = useState('');
   const [source, setSource] = useState('');
   const [sourceType, setSourceType] = useState('');
+  const [deviceName, setDeviceName] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -101,14 +104,24 @@ function AddDeviceForm({
       description: description.trim(),
       access: { read: ['*'], write: ['*'] },
     };
-    if (source.trim()) config.source = source.trim();
-    if (sourceType.trim()) config.sourceType = sourceType.trim();
+    if (service !== 'spotify') {
+      if (source.trim()) config.source = source.trim();
+      if (sourceType.trim()) config.sourceType = sourceType.trim();
+    }
+    if (service === 'spotify') {
+      if (deviceName.trim()) config.deviceName = deviceName.trim();
+      config.clientId = clientId.trim();
+      config.clientSecret = clientSecret;
+    }
     try {
       await apiSend('/api/devices', 'POST', config);
       setId('');
       setDescription('');
       setSource('');
       setSourceType('');
+      setDeviceName('');
+      setClientId('');
+      setClientSecret('');
       onAdded();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -126,7 +139,15 @@ function AddDeviceForm({
         value={id}
         onChange={(e) => setId(e.target.value)}
       />
-      <select required value={service} onChange={(e) => setService(e.target.value)}>
+      <select
+        required
+        value={service}
+        onChange={(e) => {
+          const value = e.target.value;
+          setService(value);
+          if (value !== 'spotify') setClientSecret('');
+        }}
+      >
         <option value="" disabled>
           service type
         </option>
@@ -142,16 +163,43 @@ function AddDeviceForm({
         value={description}
         onChange={(e) => setDescription(e.target.value)}
       />
-      <input
-        placeholder="source (optional)"
-        value={source}
-        onChange={(e) => setSource(e.target.value)}
-      />
-      <input
-        placeholder="sourceType (optional)"
-        value={sourceType}
-        onChange={(e) => setSourceType(e.target.value)}
-      />
+      {service !== 'spotify' ? (
+        <>
+          <input
+            placeholder="source (optional)"
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+          />
+          <input
+            placeholder="sourceType (optional)"
+            value={sourceType}
+            onChange={(e) => setSourceType(e.target.value)}
+          />
+        </>
+      ) : null}
+      {service === 'spotify' ? (
+        <>
+          <input
+            placeholder="Spotify device name (optional)"
+            value={deviceName}
+            onChange={(e) => setDeviceName(e.target.value)}
+          />
+          <input
+            placeholder="Spotify client ID"
+            required
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder="Spotify client secret"
+            required
+            value={clientSecret}
+            onChange={(e) => setClientSecret(e.target.value)}
+          />
+        </>
+      ) : null}
       <button type="submit" disabled={busy}>
         Add device
       </button>

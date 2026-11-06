@@ -51,6 +51,7 @@ export async function apiSend<T>(path: string, method: string, body?: unknown): 
     }
     throw new Error(`${method} ${path}: ${res.status}${detail ? ` — ${detail}` : ''}`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 

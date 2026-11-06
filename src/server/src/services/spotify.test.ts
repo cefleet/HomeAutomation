@@ -1,608 +1,419 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { once } from 'node:events';
 import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { mock, test } from 'node:test';
+import { test } from 'node:test';
 import express, { type Express } from 'express';
-import {
-  createSpotifyService,
-  type SoloistDaemon,
-  type SoloistHandlers,
-  type SoloistSocket,
-} from './spotify.js';
-import type { ServiceContext } from '../registry.js';
-import type { DeviceConfig, NotificationInput } from '../types.js';
+import { createSpotifyService, spotifyService } from './spotify.js';
+import { deviceRouter } from '../devices.js';
+import { clientResolution } from '../middleware.js';
+import { NotificationCenter } from '../notifications.js';
+import { ServiceRegistry, type ServiceContext } from '../registry.js';
+import type { DeviceConfig } from '../types.js';
 
 const device: DeviceConfig = {
   id: 'spotify',
   service: 'spotify',
-  source: 'ws://127.0.0.1:8080',
-  sourceType: 'soloist',
   description: 'test player',
+  deviceName: 'Kitchen account',
+  clientId: 'spotify-client-id',
+  clientSecret: 'spotify-client-secret',
+  refreshToken: 'refresh-token-secret',
   access: { read: ['*'], write: ['*'] },
 };
 
-class FakeSocket implements SoloistSocket {
-  sent: string[] = [];
-  send(d: string) {
-    this.sent.push(d);
-  }
-  close() {}
+function spotifyFetch() {
+  const calls: { url: URL; method: string; body?: string }[] = [];
+  let activeDeviceId: string | null = null;
+  let refreshStatus = 200;
+  let rotatedRefreshToken: string | undefined;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url);
+    const method = init?.method ?? 'GET';
+    const body = typeof init?.body === 'string' ? init.body : init?.body?.toString();
+    calls.push({ url, method, body });
+    if (url.hostname === 'accounts.spotify.com' && url.pathname === '/api/token') {
+      const grant = new URLSearchParams(body).get('grant_type');
+      if (grant === 'refresh_token' && refreshStatus !== 200)
+        return new Response(null, { status: refreshStatus });
+      return new Response(JSON.stringify({
+        access_token: grant === 'refresh_token' ? 'refreshed-access-token' : 'access-token',
+        refresh_token: grant === 'refresh_token' ? rotatedRefreshToken : 'refresh-token-secret',
+        expires_in: 3600,
+      }), { status: 200 });
+    }
+    if (url.pathname === '/v1/me/player' && method === 'PUT') {
+      const data = JSON.parse(body ?? '{}') as { device_ids?: string[] };
+      activeDeviceId = data.device_ids?.[0] ?? null;
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname === '/v1/me/player') {
+      if (!activeDeviceId) return new Response(null, { status: 204 });
+      return new Response(JSON.stringify({
+        device: { id: activeDeviceId, volume_percent: 55 },
+        is_playing: true,
+        progress_ms: 12000,
+        shuffle_state: true,
+        repeat_state: 'context',
+        context: { type: 'playlist' },
+        item: {
+          name: 'Test Track',
+          duration_ms: 180000,
+          artists: [{ name: 'Test Artist' }],
+          album: { name: 'Test Album', images: [{ url: 'https://image.test/album.jpg' }] },
+        },
+      }), { status: 200 });
+    }
+    if (url.pathname === '/v1/me/player/queue')
+      return new Response(JSON.stringify({ queue: [{ uri: 'spotify:track:queued', name: 'Queued', artists: [{ name: 'Artist' }], album: { images: [] } }] }), { status: 200 });
+    if (url.pathname === '/v1/search')
+      return new Response(JSON.stringify({
+        tracks: { items: [{ uri: 'spotify:track:search', name: 'Found', artists: [{ name: 'Artist' }], album: { images: [{ url: 'https://image.test/search.jpg' }] } }] },
+        albums: { items: [] },
+        playlists: { items: [] },
+      }), { status: 200 });
+    return new Response(null, { status: 204 });
+  };
+  return {
+    fetchImpl,
+    calls,
+    get activeDeviceId() { return activeDeviceId; },
+    set refreshStatus(status: number) { refreshStatus = status; },
+    set rotatedRefreshToken(value: string | undefined) { rotatedRefreshToken = value; },
+  };
 }
 
-class FakeDaemon implements SoloistDaemon {
-  killed = false;
-  exitCb?: (info: import('./spotify.js').DaemonExit) => void;
-  kill() {
-    this.killed = true;
-    // a real kill produces an exit event
-    this.exitCb?.({ code: null, signal: 'SIGTERM' });
-  }
-  onExit(cb: (info: import('./spotify.js').DaemonExit) => void) {
-    this.exitCb = cb;
-  }
-  exit() {
-    this.exitCb?.({ code: 1, signal: null });
-  }
-}
-
-interface Harness {
-  sockets: { url: string; handlers: SoloistHandlers; sock: FakeSocket }[];
-  daemons: { bin: string; args: string[]; log: (line: string) => void; d: FakeDaemon }[];
-}
-
-interface MountOpts {
-  notices?: NotificationInput[];
-  pushes?: unknown[];
-  managed?: boolean;
-  /** Managed device without daemonBin → self-managed binary under dataDir. */
-  selfManaged?: boolean;
+interface MountOptions {
   fetchImpl?: typeof fetch;
-  dataDir?: string;
+  roles?: string[];
+  pushes?: unknown[];
   device?: Partial<DeviceConfig>;
 }
 
-function mount(opts: MountOpts = {}): {
+function mount(options: MountOptions = {}): {
   app: Express;
-  harness: Harness;
+  base: string;
+  configDir: string;
+  deviceFile: string;
+  cleanup: () => void;
 } {
-  const { notices = [], pushes = [], managed = false } = opts;
-  const harness: Harness = { sockets: [], daemons: [] };
-  const service = createSpotifyService(
-    (url, handlers) => {
-      const sock = new FakeSocket();
-      harness.sockets.push({ url, handlers, sock });
-      return sock;
-    },
-    (bin, args, log) => {
-      const d = new FakeDaemon();
-      harness.daemons.push({ bin, args, log, d });
-      return d;
-    },
-    opts.fetchImpl,
-  );
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spotify-config-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spotify-data-'));
+  const configured = { ...device, ...options.device };
+  fs.mkdirSync(path.join(configDir, 'devices'), { recursive: true });
+  const deviceFile = path.join(configDir, 'devices', `${configured.id}.json`);
+  fs.writeFileSync(deviceFile, JSON.stringify(configured), { mode: 0o600 });
   const ctx: ServiceContext = {
-    device: {
-      ...(managed
-        ? {
-            ...device,
-            source: undefined,
-            sourceType: undefined,
-            apiKey: 'KEY',
-            deviceName: 'Test speaker',
-            clientId: 'cid',
-            clientSecret: 'csecret',
-            daemonBin: 'soloist',
-          }
-        : device),
-      ...opts.device,
-    },
-    push: (d) => pushes.push(d),
-    notify: (n) => notices.push(n),
-    dashboards: ['master'],
-    targets: ['master'],
-    dataDir: opts.dataDir ?? '/tmp',
+    device: configured,
+    push: (data) => options.pushes?.push(data),
+    notify: () => {},
+    dashboards: ['master', 'admin'],
+    targets: ['master', 'admin'],
+    dataDir,
+    configDir,
     prod: false,
   };
-  if (opts.selfManaged) delete ctx.device.daemonBin;
   const app = express();
   app.use(express.json());
-  app.use('/api/spotify/spotify', service.createRoutes(ctx));
-  return { app, harness };
-}
-
-/** Flush pending async work (spawn → port allocation → connect).
- *  setImmediate stays real even under mock.timers. */
-const tick = async () => {
-  for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
-};
-
-/** Poll until `cond` holds (or fail) — for real async work like tar
- *  extraction that immediate-flushes can't cover. */
-const waitFor = async (cond: () => boolean, ms = 5000) => {
-  const end = Date.now() + ms;
-  while (!cond() && Date.now() < end)
-    await new Promise((r) => setTimeout(r, 25));
-  assert.ok(cond(), 'condition not met in time');
-};
-
-async function listen(app: Express): Promise<{ base: string; close: () => void }> {
+  app.use((_req, res, next) => {
+    res.locals.roles = options.roles ?? ['admin', 'user'];
+    next();
+  });
+  app.use('/api/spotify/spotify', createSpotifyService(options.fetchImpl).createRoutes(ctx));
   const server = app.listen(0);
-  await once(server, 'listening');
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/spotify/spotify`;
-  return { base, close: () => server.close() };
+  const cleanup = () => {
+    server.close();
+    fs.rmSync(configDir, { recursive: true, force: true });
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  };
+  return {
+    app,
+    base: `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/spotify/spotify`,
+    configDir,
+    deviceFile,
+    cleanup,
+  };
 }
 
-async function command(base: string, body: unknown): Promise<Response> {
-  return fetch(`${base}/command`, {
+async function post(base: string, pathName: string, body?: unknown): Promise<Response> {
+  return fetch(`${base}${pathName}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
 
-/** Soloist entity envelope for a track. */
-const trackEntity = (name: string, over: Record<string, unknown> = {}) => ({
-  uri: `spotify:track:${name}`,
-  entity_type: 'track',
-  decorations: {
-    identity: { name },
-    visual_identity: {
-      cover: [
-        { url: 'https://img/small', size: 'small' },
-        { url: 'https://img/default', size: 'default' },
-      ],
-    },
-    parent: {
-      entity: { entity_type: 'album', decorations: { identity: { name: 'Album' } } },
-    },
-    creators: [
-      { entity: { entity_type: 'artist', decorations: { identity: { name: 'Artist' } } } },
-    ],
-    playback: { duration_ms: 200000 },
-    ...over,
-  },
+test('spotify config requires OAuth app credentials and rejects Soloist fields', () => {
+  const errors = spotifyService.validateDevices?.([
+    { ...device, clientId: undefined, clientSecret: undefined },
+    { ...device, apiKey: 'old-key' } as DeviceConfig,
+  ]) ?? [];
+  assert.ok(errors.some((error) => /requires "clientId" and "clientSecret"/.test(error)));
+  assert.ok(errors.some((error) => /apiKey.*no longer supported/.test(error)));
 });
 
-test('GET /state returns the contract, disconnected before any update', async () => {
-  const { base, close } = await listen(mount({}).app);
-  const s = await (await fetch(`${base}/state`)).json();
-  assert.equal(s.id, 'spotify');
-  assert.equal(s.connected, false);
-  assert.equal(s.loggedIn, false);
-  assert.equal(s.playing, false);
-  assert.equal(s.track, '');
-  assert.equal(s.speed, 0);
-  assert.equal(typeof s.updatedAt, 'string');
-  close();
+test('config-declared refresh token authorizes the account and returns short-lived access tokens', async () => {
+  const fake = spotifyFetch();
+  const { base, cleanup } = mount({ fetchImpl: fake.fetchImpl });
+  try {
+    const state = await (await fetch(`${base}/state`)).json();
+    assert.equal(state.loggedIn, true);
+    assert.equal(state.connected, false);
+    assert.equal(JSON.stringify(state).includes('refresh-token-secret'), false);
+
+    const tokenResponse = await fetch(`${base}/token`);
+    assert.equal(tokenResponse.headers.get('cache-control'), 'no-store');
+    const token = await tokenResponse.json();
+    assert.deepEqual(Object.keys(token).sort(), ['accessToken', 'expiresIn']);
+    assert.equal(token.accessToken, 'refreshed-access-token');
+    assert.equal(JSON.stringify(token).includes('refresh-token-secret'), false);
+    assert.equal(JSON.stringify(token).includes('spotify-client-secret'), false);
+    assert.ok(fake.calls.some((call) =>
+      call.url.pathname === '/api/token' &&
+      new URLSearchParams(call.body).get('grant_type') === 'refresh_token',
+    ));
+  } finally {
+    cleanup();
+  }
 });
 
-test('socket open marks the device connected and pushes', async () => {
+test('a device without refreshToken is reported unauthorized', async () => {
+  const fake = spotifyFetch();
+  const { base, cleanup } = mount({ fetchImpl: fake.fetchImpl, device: { refreshToken: undefined } });
+  try {
+    const state = await (await fetch(`${base}/state`)).json();
+    assert.equal(state.loggedIn, false);
+    const response = await fetch(`${base}/token`);
+    assert.equal(response.status, 401);
+    assert.match((await response.json()).error, /spotify-auth/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('rotated refresh tokens are persisted to the device config file', async () => {
+  const fake = spotifyFetch();
+  fake.rotatedRefreshToken = 'rotated-refresh-token';
+  const { base, deviceFile, cleanup } = mount({ fetchImpl: fake.fetchImpl });
+  try {
+    const token = await (await fetch(`${base}/token`)).json();
+    assert.equal(token.accessToken, 'refreshed-access-token');
+    const written = JSON.parse(fs.readFileSync(deviceFile, 'utf8'));
+    assert.equal(written.refreshToken, 'rotated-refresh-token');
+    assert.equal(fs.statSync(deviceFile).mode & 0o777, 0o600);
+    // Other config fields are preserved by the update.
+    assert.equal(written.clientId, 'spotify-client-id');
+    assert.equal(written.deviceName, 'Kitchen account');
+  } finally {
+    cleanup();
+  }
+});
+
+test('revoked refresh tokens mark the account unauthorized until re-authorized via config', async () => {
+  const fake = spotifyFetch();
+  fake.refreshStatus = 400;
+  const first = mount({ fetchImpl: fake.fetchImpl });
+  try {
+    assert.equal((await fetch(`${first.base}/token`)).status, 401);
+    assert.equal((await (await fetch(`${first.base}/state`)).json()).loggedIn, false);
+  } finally {
+    first.cleanup();
+  }
+  // Re-running spotify-auth writes a new refreshToken into the config file.
+  fake.refreshStatus = 200;
+  const second = mount({ fetchImpl: fake.fetchImpl, device: { refreshToken: 'new-refresh-token' } });
+  try {
+    const token = await (await fetch(`${second.base}/token`)).json();
+    assert.equal(token.accessToken, 'refreshed-access-token');
+    assert.ok(fake.calls.some((call) =>
+      call.url.pathname === '/api/token' &&
+      new URLSearchParams(call.body).get('refresh_token') === 'new-refresh-token',
+    ));
+  } finally {
+    second.cleanup();
+  }
+});
+
+test('access tokens remain ACL-protected', async () => {
+  const fake = spotifyFetch();
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spotify-acl-config-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spotify-acl-data-'));
+  const registry = new ServiceRegistry();
+  registry.register(createSpotifyService(fake.fetchImpl));
+  const configured = { ...device, access: { read: [], write: ['admin'] } };
+  const app = express();
+  app.use(express.json());
+  app.use(clientResolution([]));
+  app.use('/api', deviceRouter([configured], registry, new NotificationCenter(), {
+    dashboards: ['master'],
+    dataDir,
+    configDir,
+    prod: false,
+  }));
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/spotify/spotify`;
+  try {
+    assert.equal((await fetch(`${base}/token`)).status, 403);
+  } finally {
+    server.close();
+    fs.rmSync(configDir, { recursive: true, force: true });
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('multiple browser players share one account and Make Active transfers to the chosen player', async () => {
+  const fake = spotifyFetch();
+  const { base, cleanup } = mount({ fetchImpl: fake.fetchImpl });
+  try {
+    const first = await (await post(base, '/players', { deviceId: 'sdk-device-1', name: 'Tablet 1' })).json();
+    const second = await (await post(base, '/players', { deviceId: 'sdk-device-2', name: 'Tablet 2' })).json();
+    const initial = await (await fetch(`${base}/state`)).json();
+    assert.equal(initial.connected, true);
+    assert.equal(initial.players.length, 2);
+
+    const active = await post(base, `/players/${second.id}/activate`);
+    assert.equal(active.status, 200);
+    const snapshot = await active.json();
+    assert.equal(fake.activeDeviceId, 'sdk-device-2');
+    assert.equal(snapshot.isActive, true);
+    assert.equal(snapshot.activePlayerId, second.id);
+    assert.equal(snapshot.players.find((player: { id: string }) => player.id === first.id).isActive, false);
+    assert.equal(snapshot.players.find((player: { id: string }) => player.id === second.id).isActive, true);
+
+    const next = await post(base, '/command', { command: 'next' });
+    assert.equal(next.status, 200);
+    assert.ok(fake.calls.some((call) => call.url.pathname === '/v1/me/player/next' && call.url.searchParams.get('device_id') === 'sdk-device-2'));
+  } finally {
+    cleanup();
+  }
+});
+
+test('browser SDK state is mapped and pushed only for the active player', async () => {
   const pushes: unknown[] = [];
-  const { app, harness } = mount({ pushes });
-  const { base, close } = await listen(app);
-  harness.sockets[0].handlers.onOpen();
-  const s = await (await fetch(`${base}/state`)).json();
-  assert.equal(s.connected, true);
-  assert.equal((pushes[0] as { connected: boolean }).connected, true);
-  close();
-});
-
-test('playback_state snapshot maps the entity envelope', async () => {
-  const pushes: { track?: string }[] = [];
-  const { app, harness } = mount({ pushes });
-  const { base, close } = await listen(app);
-  const h = harness.sockets[0].handlers;
-  h.onOpen();
-  h.onMessage(
-    JSON.stringify({
-      type: 'auth_state',
-      logged_in: true,
-      is_active: true,
-      device_name: 'Kitchen speaker',
-    }),
-  );
-  h.onMessage(
-    JSON.stringify({
-      type: 'playback_state',
-      status: 'playing',
-      item: trackEntity('Song'),
-      context: { entity_type: 'playlist', decorations: { identity: { name: 'Mix' } } },
-      position: { position_ms: 45000, timestamp_ms: 1, speed: 1.0 },
-      volume: 65,
-      is_active: true,
-      options: { shuffle: true, repeat: 'context' },
-    }),
-  );
-  const s = await (await fetch(`${base}/state`)).json();
-  assert.equal(s.connected, true);
-  assert.equal(s.loggedIn, true);
-  assert.equal(s.isActive, true);
-  assert.equal(s.deviceName, 'Kitchen speaker');
-  assert.equal(s.playing, true);
-  assert.equal(s.track, 'Song');
-  assert.equal(s.artist, 'Artist');
-  assert.equal(s.album, 'Album');
-  assert.equal(s.albumArtUrl, 'https://img/default');
-  assert.equal(s.contextName, 'Mix');
-  assert.equal(s.volume, 65);
-  assert.equal(s.progressMs, 45000);
-  assert.equal(s.speed, 1);
-  assert.equal(s.durationMs, 200000);
-  assert.equal(s.shuffle, true);
-  assert.equal(s.repeat, 'context');
-  assert.equal(pushes.at(-1)?.track, 'Song');
-  close();
-});
-
-test('granular events update the contract', async () => {
-  const { app, harness } = mount({});
-  const { base, close } = await listen(app);
-  const h = harness.sockets[0].handlers;
-  h.onOpen();
-  h.onMessage(JSON.stringify({ type: 'playback_changed', status: 'paused' }));
-  h.onMessage(JSON.stringify({ type: 'track_changed', item: trackEntity('Next One') }));
-  h.onMessage(JSON.stringify({ type: 'volume_changed', volume: 30 }));
-  h.onMessage(
-    JSON.stringify({ type: 'position_sync', position: { position_ms: 8000, speed: 0 } }),
-  );
-  h.onMessage(JSON.stringify({ type: 'device_changed', is_active: false }));
-  const s = await (await fetch(`${base}/state`)).json();
-  assert.equal(s.playing, false);
-  assert.equal(s.track, 'Next One');
-  assert.equal(s.volume, 30);
-  assert.equal(s.progressMs, 8000);
-  assert.equal(s.isActive, false);
-  close();
-});
-
-test('malformed frames and unknown events are ignored', async () => {
-  const { app, harness } = mount({});
-  const { base, close } = await listen(app);
-  const h = harness.sockets[0].handlers;
-  h.onOpen();
-  h.onMessage('not json');
-  h.onMessage(JSON.stringify({ type: 'command_result', command: 'play' }));
-  h.onMessage(JSON.stringify({ noType: true }));
-  const s = await (await fetch(`${base}/state`)).json();
-  assert.equal(s.connected, true);
-  assert.equal(s.track, '');
-  close();
-});
-
-test('POST /command forwards Soloist command frames', async () => {
-  const { app, harness } = mount({});
-  const { base, close } = await listen(app);
-  harness.sockets[0].handlers.onOpen();
-  for (const body of [
-    { command: 'play' },
-    { command: 'next' },
-    { command: 'previous' },
-    { command: 'volume', value: 35 },
-    { command: 'seek', value: 30000 },
-    { command: 'shuffle', value: true },
-    { command: 'play-uri', value: 'spotify:playlist:xyz' },
-    { command: 'queue-add', value: 'spotify:track:abc' },
-    { command: 'activate' },
-  ]) {
-    assert.equal((await command(base, body)).status, 200, JSON.stringify(body));
-  }
-  assert.equal((await command(base, { command: 'repeat', value: 'context' })).status, 200);
-  const sent = harness.sockets[0].sock.sent.map((f) => JSON.parse(f));
-  assert.deepEqual(sent, [
-    { type: 'command', command: 'play' },
-    { type: 'command', command: 'skip_next' },
-    { type: 'command', command: 'skip_prev' },
-    { type: 'command', command: 'set_volume', volume: 35 },
-    { type: 'command', command: 'seek', position_ms: 30000 },
-    { type: 'command', command: 'set_shuffle', enabled: true },
-    { type: 'command', command: 'play', uri: 'spotify:playlist:xyz' },
-    { type: 'command', command: 'add_to_queue', uri: 'spotify:track:abc' },
-    { type: 'command', command: 'activate' },
-    { type: 'command', command: 'set_repeat_track', enabled: false },
-    { type: 'command', command: 'set_repeat_context', enabled: true },
-  ]);
-  close();
-});
-
-test('invalid commands are rejected with 400 and a notification', async () => {
-  const notices: NotificationInput[] = [];
-  const { app, harness } = mount({ notices });
-  const { base, close } = await listen(app);
-  harness.sockets[0].handlers.onOpen();
-  for (const body of [
-    { command: 'bogus' },
-    { command: 'volume' },
-    { command: 'volume', value: 150 },
-    { command: 'seek', value: 'later' },
-    { command: 'repeat', value: 'sometimes' },
-    { command: 'play-uri', value: '' },
-    {},
-  ]) {
-    assert.equal((await command(base, body)).status, 400, JSON.stringify(body));
-  }
-  assert.equal(notices.length, 7);
-  assert.equal(notices[0].type, 'issue');
-  assert.equal(harness.sockets[0].sock.sent.length, 0);
-  close();
-});
-
-test('daemon error frames surface as issue notifications', async () => {
-  const notices: NotificationInput[] = [];
-  const { app, harness } = mount({ notices });
-  const { close } = await listen(app);
-  harness.sockets[0].handlers.onOpen();
-  harness.sockets[0].handlers.onMessage(
-    JSON.stringify({ type: 'error', message: 'command requires authentication' }),
-  );
-  assert.equal(notices.length, 1);
-  assert.equal(notices[0].type, 'issue');
-  assert.equal(notices[0].body, 'command requires authentication');
-  close();
-});
-
-test('commands while disconnected return 502', async () => {
-  const { base, close } = await listen(mount({}).app);
-  const res = await command(base, { command: 'play' });
-  assert.equal(res.status, 502);
-  close();
-});
-
-test('socket close marks disconnected, pushes, and reconnects', async () => {
-  mock.timers.enable({ apis: ['setTimeout'] });
+  const fake = spotifyFetch();
+  const { base, cleanup } = mount({ fetchImpl: fake.fetchImpl, pushes });
   try {
-    const pushes: { connected?: boolean }[] = [];
-    const { app, harness } = mount({ pushes });
-    const { base, close } = await listen(app);
-    const h = harness.sockets[0].handlers;
-    h.onOpen();
-    h.onMessage(JSON.stringify({ type: 'track_changed', item: trackEntity('Song') }));
-    h.onClose();
-    const s = await (await fetch(`${base}/state`)).json();
-    assert.equal(s.connected, false);
-    assert.equal(s.track, 'Song');
-    assert.equal(pushes.at(-1)?.connected, false);
-    assert.equal(harness.sockets.length, 1);
-    mock.timers.tick(5000);
-    assert.equal(harness.sockets.length, 2);
-    close();
+    const { id } = await (await post(base, '/players', { deviceId: 'sdk-device', name: 'Tablet' })).json();
+    await post(base, `/players/${id}/activate`);
+    const response = await post(base, `/players/${id}/state`, {
+      paused: false,
+      position: 42000,
+      duration: 200000,
+      repeatMode: 2,
+      shuffle: true,
+      volume: 0.7,
+      track: {
+        name: 'SDK Track',
+        artists: [{ name: 'SDK Artist' }],
+        album: { name: 'SDK Album', images: [{ url: 'https://image.test/sdk.jpg' }] },
+      },
+      context: { metadata: { name: 'SDK Playlist' } },
+    });
+    assert.equal(response.status, 204);
+    const pushed = pushes.at(-1) as Record<string, unknown>;
+    assert.equal(pushed.track, 'SDK Track');
+    assert.equal(pushed.artist, 'SDK Artist');
+    assert.equal(pushed.repeat, 'track');
+    assert.equal(pushed.volume, 70);
+    const state = await (await fetch(`${base}/state`)).json();
+    assert.equal(state.track, 'Test Track');
+    assert.equal(state.isActive, true);
   } finally {
-    mock.timers.reset();
+    cleanup();
   }
 });
 
-test('managed mode spawns the daemon and connects to its port', async () => {
-  const { app, harness } = mount({ managed: true });
-  const { base, close } = await listen(app);
-  await tick();
-  assert.equal(harness.daemons.length, 1);
-  const d = harness.daemons[0];
-  assert.equal(d.bin, 'soloist');
-  const wsArg = d.args[d.args.indexOf('--ws') + 1];
-  assert.match(wsArg, /^127\.0\.0\.1:\d+$/);
-  assert.deepEqual(d.args.slice(0, 4), ['--device-name', 'Test speaker', '--api-key', 'KEY']);
-  assert.equal(harness.sockets.length, 1);
-  assert.equal(harness.sockets[0].url, `ws://${wsArg}`);
-  harness.sockets[0].handlers.onOpen();
-  const s = await (await fetch(`${base}/state`)).json();
-  assert.equal(s.connected, true);
-  assert.equal(s.deviceName, 'Test speaker');
-  close();
-});
-
-test('managed mode respawns the daemon on exit and notifies', async () => {
-  mock.timers.enable({ apis: ['setTimeout'] });
+test('commands require an active browser and validate values', async () => {
+  const fake = spotifyFetch();
+  const { base, cleanup } = mount({ fetchImpl: fake.fetchImpl });
   try {
-    const notices: NotificationInput[] = [];
-    const { app, harness } = mount({ notices, managed: true });
-    const { close } = await listen(app);
-    await tick();
-    harness.daemons[0].d.exit();
-    assert.equal(notices.length, 1);
-    assert.match(String(notices[0].title), /daemon exited/);
-    assert.equal(harness.daemons.length, 1);
-    mock.timers.tick(5000);
-    await tick();
-    assert.equal(harness.daemons.length, 2);
-    close();
+    assert.equal((await post(base, '/command', { command: 'unknown' })).status, 400);
+    assert.equal((await post(base, '/command', { command: 'play' })).status, 409);
+    const { id } = await (await post(base, '/players', { deviceId: 'sdk-device', name: 'Tablet' })).json();
+    await post(base, `/players/${id}/activate`);
+    assert.equal((await post(base, '/command', { command: 'volume', value: 101 })).status, 400);
+    assert.equal((await post(base, '/command', { command: 'repeat', value: 'sometimes' })).status, 400);
+    assert.equal((await post(base, '/command', { command: 'play-uri', value: 'spotify:track:abc' })).status, 200);
+    assert.ok(fake.calls.some((call) => call.url.pathname === '/v1/me/player/play' && call.method === 'PUT'));
   } finally {
-    mock.timers.reset();
+    cleanup();
   }
 });
 
-test('managed daemon is killed when the process exits', async () => {
-  const before = new Set(process.listeners('exit'));
-  const { app, harness } = mount({ managed: true });
-  const { close } = await listen(app);
-  await tick();
-  // Invoke only the exit listener this router registered.
-  const added = process.listeners('exit').filter((l) => !before.has(l));
-  assert.ok(added.length > 0);
-  for (const l of added) (l as () => void)();
-  assert.equal(harness.daemons[0].d.killed, true);
-  close();
-});
+test('a playback command from a registered browser transfers playback to it automatically', async () => {
+  const fake = spotifyFetch();
+  const { base, cleanup } = mount({ fetchImpl: fake.fetchImpl });
+  try {
+    const first = await (await post(base, '/players', { deviceId: 'sdk-device-1', name: 'Tablet 1' })).json();
+    const second = await (await post(base, '/players', { deviceId: 'sdk-device-2', name: 'Tablet 2' })).json();
+    await post(base, `/players/${first.id}/activate`);
+    assert.equal(fake.activeDeviceId, 'sdk-device-1');
 
-test('GET /queue correlates get_queue with queue_changed', async () => {
-  const { app, harness } = mount({});
-  const { base, close } = await listen(app);
-  const h = harness.sockets[0].handlers;
-  h.onOpen();
-  const p = fetch(`${base}/queue`);
-  await tick();
-  assert.equal(
-    harness.sockets[0].sock.sent.at(-1),
-    JSON.stringify({ type: 'command', command: 'get_queue' }),
-  );
-  h.onMessage(
-    JSON.stringify({
-      type: 'queue_changed',
-      previous: [],
-      upcoming: [
-        { uid: 'u1', source: 'queue', item: trackEntity('Next Up') },
-        { uid: 'u2', source: 'context', item: trackEntity('Then This') },
-      ],
-    }),
-  );
-  const body = await (await p).json();
-  assert.equal(body.upcoming.length, 2);
-  assert.equal(body.upcoming[0].name, 'Next Up');
-  assert.equal(body.upcoming[0].artist, 'Artist');
-  assert.equal(body.upcoming[0].source, 'queue');
-  assert.equal(body.upcoming[0].uri, 'spotify:track:Next Up');
-  close();
-});
-
-test('GET /queue while disconnected returns 502', async () => {
-  const { base, close } = await listen(mount({}).app);
-  assert.equal((await fetch(`${base}/queue`)).status, 502);
-  close();
-});
-
-test('GET /search maps catalog results via client-credentials token', async () => {
-  const calls: string[] = [];
-  const fakeFetch: typeof fetch = (async (url: unknown) => {
-    calls.push(String(url));
-    if (String(url).includes('/api/token'))
-      return new Response(
-        JSON.stringify({ access_token: 'tok', expires_in: 3600 }),
-        { status: 200 },
-      );
-    return new Response(
-      JSON.stringify({
-        tracks: {
-          items: [
-            {
-              uri: 'spotify:track:karma',
-              name: 'Karma Police',
-              artists: [{ name: 'Radiohead' }],
-              album: { images: [{ url: 'https://img/okc' }] },
-            },
-          ],
-        },
-        albums: { items: [] },
-        playlists: { items: [] },
-      }),
-      { status: 200 },
+    const response = await post(base, '/command', { command: 'play', playerId: second.id });
+    assert.equal(response.status, 200);
+    assert.equal(fake.activeDeviceId, 'sdk-device-2');
+    const snapshot = await response.json();
+    assert.equal(snapshot.activePlayerId, second.id);
+    const transferCalls = fake.calls.filter(
+      (call) => call.url.pathname === '/v1/me/player' && call.method === 'PUT',
     );
-  }) as typeof fetch;
-  const { app } = mount({ managed: true, fetchImpl: fakeFetch });
-  const { base, close } = await listen(app);
-  const r = await fetch(`${base}/search?q=radiohead`);
-  assert.equal(r.status, 200);
-  const { results } = await r.json();
-  assert.equal(results[0].uri, 'spotify:track:karma');
-  assert.equal(results[0].name, 'Karma Police');
-  assert.equal(results[0].sub, 'Radiohead');
-  assert.equal(results[0].artUrl, 'https://img/okc');
-  assert.ok(calls[0].includes('accounts.spotify.com'));
-  assert.ok(calls[1].includes('api.spotify.com/v1/search?q=radiohead'));
-  // cached token — second search shouldn't re-authenticate
-  await fetch(`${base}/search?q=creep`);
-  assert.equal(calls.filter((u) => u.includes('/api/token')).length, 1);
-  close();
+    assert.equal(transferCalls.length, 2);
+    assert.equal(JSON.parse(transferCalls[1].body ?? '{}').play, true);
+
+    // Commands without playerId keep targeting the active player.
+    assert.equal((await post(base, '/command', { command: 'next' })).status, 200);
+    assert.equal(fake.activeDeviceId, 'sdk-device-2');
+  } finally {
+    cleanup();
+  }
 });
 
-test('GET /search without credentials returns 400', async () => {
-  const { base, close } = await listen(mount({}).app);
-  const r = await fetch(`${base}/search?q=x`);
-  assert.equal(r.status, 400);
-  const body = await r.json();
-  assert.match(body.error, /clientId\/clientSecret/);
-  close();
+test('a command activates the sole registered player when none is active', async () => {
+  const fake = spotifyFetch();
+  const { base, cleanup } = mount({ fetchImpl: fake.fetchImpl });
+  try {
+    await post(base, '/players', { deviceId: 'sdk-device', name: 'Tablet' });
+    // No activation: a command with no usable playerId falls back to the
+    // only registered player (also covers a stale id after re-registration).
+    const response = await post(base, '/command', { command: 'play', playerId: 'stale-id' });
+    assert.equal(response.status, 200);
+    assert.equal(fake.activeDeviceId, 'sdk-device');
+    assert.ok(fake.calls.some(
+      (call) => call.url.pathname === '/v1/me/player' && call.method === 'PUT',
+    ));
+  } finally {
+    cleanup();
+  }
 });
 
-/** A real .tar.gz containing a stub `soloist` file, served by fake fetch. */
-function fakeRelease() {
-  const src = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-soloist-pkg-'));
-  fs.writeFileSync(path.join(src, 'soloist'), '#!/bin/sh\necho fake\n');
-  const tgz = path.join(src, 'rel.tar.gz');
-  spawnSync('tar', ['-czf', tgz, '-C', src, 'soloist']);
-  const fetched: string[] = [];
-  const fetchImpl = (async (url: unknown) => {
-    fetched.push(String(url));
-    return new Response(fs.readFileSync(tgz));
-  }) as typeof fetch;
-  return { fetchImpl, fetched };
-}
-
-test('self-managed binary is downloaded and spawned when missing', async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-soloist-data-'));
-  const { fetchImpl, fetched } = fakeRelease();
-  const { app, harness } = mount({
-    managed: true,
-    selfManaged: true,
-    fetchImpl,
-    dataDir,
-  });
-  const { close } = await listen(app);
-  await waitFor(() => harness.daemons.length === 1);
-  assert.equal(fetched.length, 1);
-  assert.match(fetched[0], /soloist_release_\w+\.tar\.gz$/);
-  const bin = path.join(dataDir, 'soloist', 'soloist');
-  assert.ok(fs.existsSync(bin));
-  assert.equal(harness.daemons[0].bin, bin);
-  close();
+test('queue and search use supported Spotify APIs', async () => {
+  const fake = spotifyFetch();
+  const { base, cleanup } = mount({ fetchImpl: fake.fetchImpl });
+  try {
+    const queue = await (await fetch(`${base}/queue`)).json();
+    assert.equal(queue.upcoming[0].uri, 'spotify:track:queued');
+    const search = await (await fetch(`${base}/search?q=radiohead`)).json();
+    assert.equal(search.results[0].uri, 'spotify:track:search');
+    assert.ok(fake.calls.some((call) => call.url.pathname === '/v1/me/player/queue'));
+    assert.ok(fake.calls.some((call) => call.url.pathname === '/v1/search'));
+  } finally {
+    cleanup();
+  }
 });
 
-test('expiring self-managed binary warns, re-downloads, and respawns', async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ha-soloist-data-'));
-  const bin = path.join(dataDir, 'soloist', 'soloist');
-  fs.mkdirSync(path.dirname(bin), { recursive: true });
-  fs.writeFileSync(bin, '#!/bin/sh\n'); // already installed → no bootstrap fetch
-  const { fetchImpl, fetched } = fakeRelease();
-  const notices: NotificationInput[] = [];
-  const { app, harness } = mount({
-    notices,
-    managed: true,
-    selfManaged: true,
-    fetchImpl,
-    dataDir,
-  });
-  const { close } = await listen(app);
-  await waitFor(() => harness.daemons.length === 1);
-  harness.daemons[0].log('2026-10-27: client expires in 10 days');
-  await waitFor(() => harness.daemons.length === 2);
-  assert.ok(
-    notices.some((n) => /update needed/.test(String(n.title))),
-    'expected an update-needed notification',
-  );
-  assert.ok(
-    notices.some((n) => /soloist updated/.test(String(n.title))),
-    'expected an updated notification',
-  );
-  assert.equal(fetched.length, 1);
-  assert.equal(harness.daemons[0].d.killed, true);
-  close();
-});
-
-test('daemonBin mode warns on expiry but never downloads', async () => {
-  const { fetchImpl, fetched } = fakeRelease();
-  const notices: NotificationInput[] = [];
-  const { app, harness } = mount({ notices, managed: true, fetchImpl });
-  const { close } = await listen(app);
-  await tick();
-  harness.daemons[0].log('2026-10-27: client expires in 5 days');
-  assert.match(
-    String(notices.find((n) => /update needed/.test(String(n.title)))?.body),
-    /expires in 5 day/,
-  );
-  assert.equal(fetched.length, 0);
-  assert.equal(harness.daemons.length, 1);
-  close();
-});
-
-test('stale apiKeyIssued warns about key expiry at startup', async () => {
-  const notices: NotificationInput[] = [];
-  mount({
-    notices,
-    managed: true,
-    device: { apiKeyIssued: '2025-01-01' },
-  });
-  assert.equal(notices.length, 1);
-  assert.match(String(notices[0].title), /api key expires soon/);
-  assert.match(String(notices[0].body), /developer\.spotify\.com/);
+test('browser heartbeat and disconnect update the shared player list', async () => {
+  const fake = spotifyFetch();
+  const { base, cleanup } = mount({ fetchImpl: fake.fetchImpl });
+  try {
+    const { id } = await (await post(base, '/players', { deviceId: 'sdk-device', name: 'Tablet' })).json();
+    assert.equal((await post(base, `/players/${id}/heartbeat`)).status, 204);
+    assert.equal((await fetch(`${base}/state`).then((response) => response.json())).players.length, 1);
+    assert.equal((await fetch(`${base}/players/${id}`, { method: 'DELETE' })).status, 204);
+    const state = await (await fetch(`${base}/state`)).json();
+    assert.equal(state.players.length, 0);
+    assert.equal(state.connected, false);
+  } finally {
+    cleanup();
+  }
 });

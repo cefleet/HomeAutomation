@@ -23,6 +23,7 @@ function mount(notices: NotificationInput[] = [], source?: string): Express {
     dashboards: ['master'],
     targets: ['master'],
     dataDir: '/tmp',
+    configDir: '/tmp',
     prod: false,
   };
   const app = express();

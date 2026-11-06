@@ -22,6 +22,8 @@ export interface ServiceContext {
   targets: string[];
   /** Directory for service-managed runtime state (e.g. message logs). */
   dataDir: string;
+  /** Root config directory; services may persist device config updates. */
+  configDir: string;
   /** Production mode: dashboard overrides are restricted to the resolved
    *  dashboard or admin callers. */
   prod: boolean;
@@ -32,6 +34,7 @@ export interface ServiceExtras {
   /** Dashboards accepting each disable-able feature, for target lists. */
   featureTargets?: Partial<Record<DashboardFeature, string[]>>;
   dataDir: string;
+  configDir: string;
   prod: boolean;
 }
 
@@ -116,6 +119,7 @@ export class ServiceRegistry {
         ? (extras.featureTargets?.[feature] ?? extras.dashboards)
         : extras.dashboards,
       dataDir: extras.dataDir,
+      configDir: extras.configDir,
       prod: extras.prod,
     };
   }

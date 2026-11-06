@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiSend } from '../../api';
 import { showError } from '../../errors';
+import {
+  spotifyPlayerRegistration,
+  unlockSpotifyPlayer,
+  useSpotifyPlayer,
+} from '../../hooks/useSpotifyPlayer';
 import type { MediaPlayerState } from '../../types';
 import type { CardProps } from './types';
 
@@ -18,6 +23,7 @@ export function MediaPlayerCard({ device, data }: CardProps) {
   const loggedIn = s.loggedIn === true;
   const playing = s.playing === true;
   const usable = connected && loggedIn;
+  const localPlayer = useSpotifyPlayer(device.id, s.deviceName || device.id, loggedIn);
   const [vol, setVol] = useState<number | null>(null);
   const [, tick] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout>>();
@@ -52,12 +58,13 @@ export function MediaPlayerCard({ device, data }: CardProps) {
     command: string,
     value?: number | string | boolean,
   ): Promise<boolean> => {
+    unlockSpotifyPlayer(device.id);
     try {
-      await apiSend(
-        `/api/${device.type}/${device.id}/command`,
-        'POST',
-        value === undefined ? { command } : { command, value },
-      );
+      await apiSend(`/api/${device.type}/${device.id}/command`, 'POST', {
+        command,
+        ...(value === undefined ? {} : { value }),
+        playerId: spotifyPlayerRegistration(device.id) ?? undefined,
+      });
       return true;
     } catch (e) {
       showError(`${device.id}: ${e instanceof Error ? e.message : e}`);
@@ -109,6 +116,8 @@ export function MediaPlayerCard({ device, data }: CardProps) {
       {label}
     </button>
   );
+  const players = s.players ?? [];
+  const localRegistration = players.find((player) => player.id === localPlayer.registrationId);
 
   return (
     <div className="card-body">
@@ -151,23 +160,14 @@ export function MediaPlayerCard({ device, data }: CardProps) {
           onClick={(e) => e.stopPropagation()}
         />
       ) : null}
-      {!connected ? <p className="muted">player offline</p> : null}
-      {connected && !loggedIn ? (
-        <p className="muted">not paired — select {s.deviceName || 'it'} in the Spotify app</p>
-      ) : null}
-      {connected && loggedIn && s.isActive === false ? (
-        <p>
-          <button
-            className="media-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              void send('activate');
-            }}
-          >
-            make active
-          </button>
-          <span className="muted"> not the active Spotify device</span>
-        </p>
+      {!loggedIn ? (
+        <p className="muted">Spotify account not authorized — run spotify-auth on the server</p>
+      ) : localRegistration?.isActive ? (
+        <p className="muted">Playing on this browser</p>
+      ) : s.isActive ? (
+        <p className="muted">Playing on another browser — press play to move it here</p>
+      ) : !connected ? (
+        <p className="muted">No player connected</p>
       ) : null}
     </div>
   );
