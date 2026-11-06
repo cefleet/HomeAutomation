@@ -1,3 +1,6 @@
+* {
+  -webkit-tap-highlight-color: transparent;
+}
 :root {
   color-scheme: dark;
   --bg: #0f1117;
@@ -14,14 +17,19 @@ body {
   color: var(--text);
 }
 main {
+  position: relative;
   max-width: 1100px;
   margin: 0 auto;
   padding: 24px;
   color: var(--text);
 }
 .dashboard-backdrop {
-  position: fixed;
-  inset: 0;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  min-height: 100vh;
   z-index: -1;
   background-color: var(--bg);
   background-size: cover;
@@ -75,6 +83,12 @@ header {
 .card {
   position: relative;
   padding: 8px;
+}
+/* Cards float on a translucent surface when the dashboard shows a
+ *  backdrop image; color-mix tints the themed surface. */
+.has-backdrop .card {
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  border-radius: 12px;
 }
 .card-boxed {
   border: 2px solid var(--border);

@@ -55,7 +55,7 @@ export function DashboardPage({ id }: { id?: string }) {
     if (THEME_VARS[k]) themeStyle[THEME_VARS[k]] = v;
 
   return (
-    <main style={themeStyle}>
+    <main style={themeStyle} className={theme?.background ? 'has-backdrop' : undefined}>
       {theme ? (
         <div
           className="dashboard-backdrop"
